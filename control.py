@@ -9,6 +9,7 @@ from elevator import Elevator
 import Queue
 import threading
 import logging
+import time
 logging.basicConfig(filename='elevator.log',level=logging.DEBUG)
 
 
@@ -96,6 +97,7 @@ class Controller(threading.Thread):
 
                     # cancel and reassign the requested elevator
                     if best_elevator:
+                        print 'assigning optimize request ' + str(best_elevator.getName())
                         best_elevator.controller_call(working_e.called_floor, working_e.request_direction)
                         best_elevator.pending_calls = working_e.pending_calls
                         self.cancel(working_e)
@@ -117,7 +119,7 @@ class Controller(threading.Thread):
 
     def run(self):
         while True:
-
+            time.sleep(1)
             try:
                 # pull request from the queue.
                 (direction, floor) = self.queue.get_nowait()
@@ -147,6 +149,7 @@ class Controller(threading.Thread):
 
                     if best_elevator >= 0:
                         # send the best elevator to the requested floor and break the loop.
+                        print 'assigning standard request ' +str(floor) + ' ' + str(best_elevator)
                         self.call(best_elevator, floor, direction)
                         awaiting_service = False
 
@@ -156,13 +159,13 @@ class Controller(threading.Thread):
                         # make sure that we check the requested direction so that we can properly service the previous request
                         for i in self.elevators:
                             if self.elevators[i].request_direction == direction and not self.elevators[i].crash:
-                                if self.elevators[i].status == Elevator.MOVING_UP and self.elevators[i].requested_floors[self.elevators[i].called_floor]['controller']:
+                                if self.elevators[i].status == Elevator.MOVING_UP and self.elevators[i].requested_floors[self.elevators[i].called_floor]['controller'] and direction == Elevator.MOVING_DOWN:
                                     if floor > self.elevators[i].called_floor:
                                         if floor - self.elevators[i].called_floor < distance_from_request:
                                             distance_from_request = floor - self.elevators[i].called_floor
                                             best_elevator = i
 
-                                elif self.elevators[i].status == Elevator.MOVING_DOWN and self.elevators[i].requested_floors[self.elevators[i].called_floor]['controller']:
+                                elif self.elevators[i].status == Elevator.MOVING_DOWN and self.elevators[i].requested_floors[self.elevators[i].called_floor]['controller'] and direction == Elevator.MOVING_UP:
                                     if floor < self.elevators[i].called_floor:
                                         if self.elevators[i].called_floor - floor < distance_from_request:
                                             distance_from_request = self.elevators[i].called_floor - floor
@@ -171,6 +174,7 @@ class Controller(threading.Thread):
                         if best_elevator >= 0:
                             # switch call finds changes the terminal request and stores the old state in a pending array.
                             # a switch can happen multiple times for an elevator.
+                            print 'assigning switch request ' +str(floor) + ' ' + str(best_elevator)
                             self.switch_call(best_elevator, floor)
 
                     #if an elevator is crashed then reassigned the requests to the queue
