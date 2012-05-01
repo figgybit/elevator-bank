@@ -61,11 +61,11 @@ def main(argv=None):
                         # command expected in the form of 'elevator elevator_num floor_num'
                         elevator_num = var[1]
                         floor = var[2]
-                        c.request_floor(elevator_num, floor)
+                        c.request_floor(int(elevator_num), int(floor))
                     elif command == 'crash':
                         # command expected in the form of 'crash elevator_num'
                         elevator_num = var[1]
-                        c.crash(elevator_num)
+                        c.crash(int(elevator_num))
 
 
         else:
