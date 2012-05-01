@@ -97,7 +97,6 @@ class Controller(threading.Thread):
 
                     # cancel and reassign the requested elevator
                     if best_elevator:
-                        print 'assigning optimize request ' + str(best_elevator.getName())
                         best_elevator.controller_call(working_e.called_floor, working_e.request_direction)
                         best_elevator.pending_calls = working_e.pending_calls
                         self.cancel(working_e)
@@ -173,7 +172,6 @@ class Controller(threading.Thread):
                         if best_elevator >= 0:
                             # switch call finds changes the terminal request and stores the old state in a pending array.
                             # a switch can happen multiple times for an elevator.
-                            print 'assigning switch request ' +str(floor) + ' ' + str(best_elevator)
                             self.switch_call(best_elevator, floor)
 
                     #if an elevator is crashed then reassigned the requests to the queue
