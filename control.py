@@ -149,7 +149,6 @@ class Controller(threading.Thread):
 
                     if best_elevator >= 0:
                         # send the best elevator to the requested floor and break the loop.
-                        print 'assigning standard request ' +str(floor) + ' ' + str(best_elevator)
                         self.call(best_elevator, floor, direction)
                         awaiting_service = False
 
