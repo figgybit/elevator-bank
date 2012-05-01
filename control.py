@@ -4,16 +4,10 @@ Created on April 27, 2012
 
 Class for Controller
 
-TODO:
--handle input from users that is out of bounds
--add more logging
--merge request_up and request_down into one function
-
 '''
 from elevator import Elevator
 import Queue
 import threading
-import time
 import logging
 logging.basicConfig(filename='elevator.log',level=logging.DEBUG)
 
@@ -50,9 +44,9 @@ class Controller(threading.Thread):
         # working elevators are elevators that are currently servicing a set of requests.
         working_elevators = []
         for i in self.elevators:
-            if self.elevators[i].status == Elevator.WAITING:
+            if self.elevators[i].status == Elevator.WAITING and not self.elevators[i].crash:
                 waiting_elevators.append(self.elevators[i])
-            else:
+            elif not self.elevators[i].crash:
                 working_elevators.append(self.elevators[i])
 
         if waiting_elevators:
@@ -104,12 +98,25 @@ class Controller(threading.Thread):
                     if best_elevator:
                         best_elevator.controller_call(working_e.called_floor, working_e.request_direction)
                         best_elevator.pending_calls = working_e.pending_calls
-                        working_e.cancel = True
+                        self.cancel(working_e)
+
+    def cleanup_crash(self):
+        # add current requests in crashed elevator to queue for reassignment
+        # once the request is reassigned then clear out the data for the elevator and set the status to OFFLINE
+        for i in self.elevators:
+            if self.elevators[i].status == Elevator.CRASH:
+                for floor in self.elevators[i].requested_floors:
+                    # pass the current request into the queue
+                    if self.elevators[i].requested_floors[floor]['controller']:
+                        self.queue.put((self.elevators[i].request_direction, floor))
+                    # pass the pending requests into the queue
+                    for floor in self.elevators[i].pending_calls:
+                        self.queue.put((self.elevators[i].request_direction, floor))
+                self.elevators[i].set_offline()
 
 
     def run(self):
         while True:
-            time.sleep(1)
 
             try:
                 # pull request from the queue.
@@ -118,11 +125,17 @@ class Controller(threading.Thread):
                 best_elevator = None
                 distance_from_request = self.num_floors
 
+                # check to see if another elevator is servicing this same request.  Just in case a user inputs that same command twice
+                # we don't want to send another elevator to service the same request.
+                for i in self.elevators:
+                    if self.elevators[i].request_direction == direction and self.elevators[i].requested_floors[floor]['controller']:
+                        awaiting_service = False
+
                 while awaiting_service:
                     # awaiting_service is used to continue the loop until we can service a request
                     for i in self.elevators:
                         # if an elevator is waiting then send the closest elevator to the request
-                        if self.elevators[i].status == Elevator.WAITING:
+                        if self.elevators[i].status == Elevator.WAITING and not self.elevators[i].crash:
                             if floor > self.elevators[i].current_floor:
                                 if floor - self.elevators[i].current_floor < distance_from_request:
                                     distance_from_request = floor - self.elevators[i].current_floor
@@ -142,7 +155,7 @@ class Controller(threading.Thread):
                         # then switch nearest elevator's request to secondary request and make new request terminal stop
                         # make sure that we check the requested direction so that we can properly service the previous request
                         for i in self.elevators:
-                            if self.elevators[i].request_direction == direction:
+                            if self.elevators[i].request_direction == direction and not self.elevators[i].crash:
                                 if self.elevators[i].status == Elevator.MOVING_UP and self.elevators[i].requested_floors[self.elevators[i].called_floor]['controller']:
                                     if floor > self.elevators[i].called_floor:
                                         if floor - self.elevators[i].called_floor < distance_from_request:
@@ -160,56 +173,50 @@ class Controller(threading.Thread):
                             # a switch can happen multiple times for an elevator.
                             self.switch_call(best_elevator, floor)
 
+                    #if an elevator is crashed then reassigned the requests to the queue
+                    self.cleanup_crash()
+
                     # optimize requests in relation to elevators that were working and now have a changed status to WAITING
                     self.optimize()
             except:
+                #if an elevator is crashed then reassigned the requests to the queue
+                self.cleanup_crash()
+
                 # optimize requests in relation to elevators that were working and now have a changed status to WAITING
                 self.optimize()
 
 
     def request_up(self, floor):
         # attempt to send an elevator to service a request but if that is not successful store the request in a queue to be processed later
-        if floor < self.num_floors - 1:
-            best_elevator = None
-            distance_from_request = self.num_floors
-            for i in self.elevators:
-                if (self.elevators[i].status == Elevator.MOVING_UP) and (self.elevators[i].current_floor < floor) and (self.elevators[i].called_floor > floor):
-                    if self.elevators[i].current_floor - floor < distance_from_request:
-                        best_elevator = i
-
-            if best_elevator >= 0:
-                self.call(best_elevator, floor)
-            else:
-                self.queue.put((Elevator.MOVING_UP, floor))
+        # there are num_floor-1 floors and the num_floor-1th cannot request up since it is the top floor.
+        # therefore we check for < num_floor-1
+        if floor < self.num_floors-1 and floor >= 0:
+            self.queue.put((Elevator.MOVING_UP, floor))
 
     def request_down(self, floor):
         # attempt to send an elevator to service a request but if that is not successful store the request in a queue to be processed later
-        if floor > 0:
-            best_elevator = None
-            distance_from_request = self.num_floors
-            for i in self.elevators:
-                if (self.elevators[i].status == Elevator.MOVING_DOWN) and (self.elevators[i].current_floor > floor) and (self.elevators[i].called_floor < floor):
-                    if self.elevators[i].current_floor - floor < distance_from_request:
-                        best_elevator = i
-
-            if best_elevator >= 0:
-                self.call(best_elevator, floor)
-            else:
-                self.queue.put((Elevator.MOVING_DOWN, floor))
+        if floor > 0 and floor <= self.num_floors-1:
+            self.queue.put((Elevator.MOVING_DOWN, floor))
 
     def request_floor(self, elevator_num, floor):
-        # send an elevator on a request
-        self.call(elevator_num, floor)
+        # send an elevator on a user request (person inside the elevator)
+        if floor >= 0 and floor <= self.num_floors-1:
+            self.elevators[elevator_num].elevator_call(floor)
 
     def call(self, elevator_num, floor, direction):
-        # send an elevator on a request
+        # send an elevator on a request (person requesting elevator from a floor)
         self.elevators[elevator_num].controller_call(floor, direction)
 
     def switch_call(self, elevator_num, floor):
         # switch an elevator's request because a more optimal elevator has come available.
         self.elevators[elevator_num].controller_switch_call(floor)
 
+    def crash(self, elevator_num):
+        # switch an elevator's request because a more optimal elevator has come available.
+        self.elevators[elevator_num].crash_elevator()
 
+    def cancel(self, working_e):
+        working_e.cancel_elevator()
 
 
 

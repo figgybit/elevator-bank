@@ -4,13 +4,6 @@ Created on April 27, 2012
 
 Class for Elevator
 
-TODO:
--handle exceptions.
---create status CRASH - if status is CRASH have controller reassign self.pending_calls and self.requested_floors to another elevator.
---create status ERROR - once elevator has been reassigned set the status to ERROR.
--canceled elevator
---make sure that the elevator services all requests from users within the elevator before it stops all operation.
---create int to hold the number of elevator requests and add check to line 93
 '''
 
 import time
@@ -27,7 +20,8 @@ class Elevator(threading.Thread):
     MOVING_UP = 2
     MOVING_DOWN = 3
     SERVICING = 4
-    ERROR = 5
+    CRASH = 5
+    OFFLINE = 6
 
     # Amount of time it takes to move between floors
     TRANSVERSE_INTERVAL = 5
@@ -37,6 +31,8 @@ class Elevator(threading.Thread):
     SERVICING_INTERVAL = 10
     # Amount of time we wait for a user to enter the elevator
     ENTRY_INTERVAL = 5
+    # Amount of time an elevator is offlne after it crashes
+    OFFLINE_INTERVAL = 300
 
     def __init__(self, num_floors):
         # Elevator starts at floor 0 and are waiting for a request
@@ -55,6 +51,12 @@ class Elevator(threading.Thread):
         # then this elevator will be cancelled and the other elevator will take over it's request
         self.cancel = False
 
+        # flag to determine if the elevator is crashed.
+        self.crash = False
+
+        # flag to keep the thread working.  using in the testing framework
+        self.running = True
+
         # If all elevators are working and a new controller request that has the same requested_direction
         # then the elevator that is closest will change it's called_floor and hold the previous requests as a pending_request.
         self.pending_calls = []
@@ -72,11 +74,16 @@ class Elevator(threading.Thread):
 
     def run(self):
         logging.info('Starting Elevator '+self.getName())
-        while True:
+        while self.running:
             # this is the loop that initiates the movement of the elevator.
-            if self.called_floor != self.current_floor:
-                self.requested_floors[self.called_floor]['controller'] = True
+            if self.called_floor != self.current_floor and not self.crash:
+                ####self.requested_floors[self.called_floor]['controller'] = True
                 self.traverse()
+            if self.status == Elevator.OFFLINE:
+                time.sleep(Elevator.OFFLINE_INTERVAL)
+                self.status = Elevator.WAITING
+                self.crash = False
+
 
     def traverse(self):
         logging.info('Elevator '+self.getName() + ' On Floor: ' + str(self.current_floor) + ' ' + str(datetime.datetime.now()))
@@ -90,7 +97,7 @@ class Elevator(threading.Thread):
             interval = 1
 
         # the elevator will continue to move as long as the elevator is not at the called_floor
-        while self.current_floor != self.called_floor and not self.cancel:
+        while self.current_floor != self.called_floor and not self.cancel and not self.crash:
             self.current_floor += interval
 
             # when the elevator arrives at the called_floor:
@@ -136,6 +143,10 @@ class Elevator(threading.Thread):
             self.pending_calls = []
             self.called_floor = self.current_floor
             self.cancel = False
+        elif self.crash:
+            # logic to handle a crashed elevator
+            logging.info('Elevator '+self.getName() + ' has Crashed near Floor : ' + str(self.current_floor) + ' ' + str(datetime.datetime.now()))
+            self.status = Elevator.CRASH
         else:
             if self.pending_calls:
                 # if the elevator has pending_calls then the elevator will not wait for a user to press a button
@@ -162,6 +173,7 @@ class Elevator(threading.Thread):
         if (self.status == Elevator.MOVING_DOWN and self.called_floor > floor) or (self.status == Elevator.MOVING_UP and self.called_floor < floor) or (self.status in (Elevator.WAITING,Elevator.SERVICING)):
             self.called_floor = floor
             self.request_direction = direction
+            logging.info('Elevator '+self.getName() + ' Control Request Received for Floor : ' + str(floor))
         self.requested_floors[floor]['controller'] = True
 
     def elevator_call(self, floor):
@@ -169,6 +181,12 @@ class Elevator(threading.Thread):
         # if the elevator is WAITING then it should set the final desination.
         if (self.status == Elevator.MOVING_DOWN and self.called_floor > floor) or (self.status == Elevator.MOVING_UP and self.called_floor < floor) or (self.status in (Elevator.WAITING,Elevator.SERVICING)):
             self.called_floor = floor
+            logging.info('Elevator '+self.getName() + ' User Request Received for Floor : ' + str(floor))
+            if floor > self.current_floor:
+                self.status = Elevator.MOVING_UP
+            else:
+                self.status = Elevator.MOVING_DOWN
+
         self.requested_floors[floor]['elevator'] = True
 
     def controller_switch_call(self, floor):
@@ -178,5 +196,22 @@ class Elevator(threading.Thread):
         self.requested_floors[self.called_floor]['controller'] = False
         self.pending_calls.append(self.called_floor)
         self.called_floor = floor
+
+    def crash_elevator(self):
+        self.crash = True
+
+    def cancel_elevator(self):
+        self.cancel = True
+
+    def set_offline(self):
+        logging.info('Elevator '+self.getName() + ' is going OFFLINE on Floor : ' + str(self.current_floor) + ' ' + str(datetime.datetime.now()))
+        for floor in self.requested_floors:
+            self.requested_floors[floor]['elevator'] = False
+            self.requested_floors[floor]['controller'] = False
+
+        self.status = Elevator.OFFLINE
+        self.request_direction = Elevator.WAITING
+        self.pending_calls = []
+        self.called_floor = self.current_floor
 
 
